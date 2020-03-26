@@ -1,34 +1,79 @@
 {
   "project_info": {
-    "project_number": "222922332991",
-    "firebase_url": "https://open-thermal-camera-d0df3.firebaseio.com",
-    "project_id": "open-thermal-camera-d0df3",
-    "storage_bucket": "open-thermal-camera-d0df3.appspot.com"
+    "project_number": "446330053619",
+    "firebase_url": "https://temparaturesensor.firebaseio.com",
+    "project_id": "temparaturesensor",
+    "storage_bucket": "temparaturesensor.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:222922332991:android:6d76a51b7f1d7ce9e0918a",
+        "mobilesdk_app_id": "1:446330053619:android:fb885ce3319f5023b6a886",
         "android_client_info": {
-          "package_name": "com.themarpe.openthermalcamera"
+          "package_name": "com.example.temparaturesensor"
         }
       },
       "oauth_client": [
         {
-          "client_id": "222922332991-qh4qn7m730ee4pcrnm36v78j9t53gn7j.apps.googleusercontent.com",
+          "client_id": "446330053619-7o6ddrp0967ftovcorl089u0g95b60mn.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.temparaturesensor",
+            "certificate_hash": "1b8edb8ed156107d7fa0e5b34e6edf056e37e0f3"
+          }
+        },
+        {
+          "client_id": "446330053619-64g09537de3no7ebh9nfmfvbf3938763.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyBqaOZv6LXJh8ivwa0WMnDg3SRB7vq1vLM"
+          "current_key": "AIzaSyC6CpmEV1RsNI5fh0JhNYerxyRtFNbR8Ak"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "222922332991-qh4qn7m730ee4pcrnm36v78j9t53gn7j.apps.googleusercontent.com",
+              "client_id": "446330053619-64g09537de3no7ebh9nfmfvbf3938763.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:446330053619:android:b3b104ef528800d9b6a886",
+        "android_client_info": {
+          "package_name": "com.themarpe.openthermalcamera"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "446330053619-5mgs22m52f6f6e32ujooo3v0sja0me98.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.themarpe.openthermalcamera",
+            "certificate_hash": "b89be629ca8b5e25fc0ed483cd7e09ae8adfe936"
+          }
+        },
+        {
+          "client_id": "446330053619-64g09537de3no7ebh9nfmfvbf3938763.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC6CpmEV1RsNI5fh0JhNYerxyRtFNbR8Ak"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "446330053619-64g09537de3no7ebh9nfmfvbf3938763.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

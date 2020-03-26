@@ -16,6 +16,7 @@ import android.hardware.SensorManager;
 import android.media.MediaScannerConnection;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
 import android.preference.PreferenceManager;
 import android.util.Base64;
 import android.util.Log;
@@ -28,21 +29,31 @@ import android.view.WindowManager;
 import android.view.animation.Animation;
 import android.view.animation.LinearInterpolator;
 import android.view.animation.RotateAnimation;
+import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 import com.otaliastudios.cameraview.Audio;
 import com.otaliastudios.cameraview.CameraListener;
 import com.otaliastudios.cameraview.CameraView;
 import com.otaliastudios.cameraview.Gesture;
 import com.otaliastudios.cameraview.GestureAction;
 import com.otaliastudios.cameraview.PictureResult;
+import com.themarpe.openthermalcamera.Palette.ThermalPalette;
+import com.themarpe.openthermalcamera.model.HHA000001;
+import com.themarpe.openthermalcamera.model.Temp;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -58,15 +69,15 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
-
-import com.themarpe.openthermalcamera.Palette.ThermalPalette;
-
-import com.themarpe.openthermalcamera.R;
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.Random;
 
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
+    public static final String FIREBASE_DB = "https://temparaturesensor.firebaseio.com/";
 
     IRView irView;
     IRPicture irPicture = null;
@@ -87,6 +98,11 @@ public class MainActivity extends AppCompatActivity {
 
     LayoutRotateOnOrientation layoutRotateOnOrientation = null;
 
+    TextView tvTemp;
+    Button btnGetData;
+    HHA000001 hha000001;
+    String[] arrayTempData;
+    String tempData = "";
 
     @Override
     protected void onDestroy() {
@@ -103,11 +119,13 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        initFirebaseData();
+
         //Get shared preferences (Settings)
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
 
         //Toast if runtime exception happened
-        if(sharedPreferences.getBoolean("cameraview_crashed", false)){
+        if (sharedPreferences.getBoolean("cameraview_crashed", false)) {
             Toast.makeText(this, "CameraView error caught, disabled RGB overlay", Toast.LENGTH_SHORT).show();
             sharedPreferences.edit().remove("cameraview_crashed").apply();
         }
@@ -132,7 +150,7 @@ public class MainActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         //request for permissions
-        ActivityCompat.requestPermissions(this,new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE},1);
+        ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
 
         //irView (extended ImageView)
         irView = findViewById(R.id.irView);
@@ -161,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
 
         //OTC
         otc = new OTC(this, new OTCStateListener());
-        otc.setResponseListener(new OTC.ResponseListener(){
+        otc.setResponseListener(new OTC.ResponseListener() {
 
             @Override
             public void onResponsePre(Protocol.RspStruct rsp) {
@@ -170,7 +188,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onResponsePost(Protocol.RspStruct rsp) {
-                if(rsp.responseCode == Protocol.RSP_GET_FRAME_DATA){
+                if (rsp.responseCode == Protocol.RSP_GET_FRAME_DATA) {
 
                     //set temperatures and irView
                     irPicture.updateTemperatureData(otc.getIrTemp());
@@ -180,39 +198,36 @@ public class MainActivity extends AppCompatActivity {
                     DecimalFormat df = new DecimalFormat("#.0");
                     textMinIrTemp.setText(df.format(otc.getMinIrTemp()));
                     textMaxIrTemp.setText(df.format(otc.getMaxIrTemp()));
-                    textAvgIrTemp.setText(df.format((otc.getMaxIrTemp() + otc.getMinIrTemp()) / 2.0 ));
+                    textAvgIrTemp.setText(df.format((otc.getMaxIrTemp() + otc.getMinIrTemp()) / 2.0));
 
                     //Display temp spectrum according to template
                     imgTempSpectrum.setImageBitmap(irView.getIRPicture().getSpectrumBitmap());
                     imgTempSpectrum.invalidate();
-
                 }
             }
-
         });
-
 
         //take picture button
         findViewById(R.id.btnTakePicture).setOnClickListener((View v) -> {
 
-                //flash animation
-                irView.startFlashAnimation();
+            //flash animation
+            irView.startFlashAnimation();
 
-                //check if permissions
-                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    // Permission is not granted
-                    Toast.makeText(MainActivity.this, "No permission to take picture", Toast.LENGTH_SHORT);
-                    return;
-                }
+            //check if permissions
+            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                // Permission is not granted
+                Toast.makeText(MainActivity.this, "No permission to take picture", Toast.LENGTH_SHORT);
+                return;
+            }
 
-                //Check if RGB+IR or IR only
-                if(sharedPreferences.getBoolean("overlay_enabled", false)){
-                    //RGB+IR
-                    camera.takePictureSnapshot();
-                } else {
-                    saveTakenPicture(takeIrPicture(), null, layoutRotateOnOrientation.getCurrentOrientation());
-                }
+            //Check if RGB+IR or IR only
+            if (sharedPreferences.getBoolean("overlay_enabled", false)) {
+                //RGB+IR
+                camera.takePictureSnapshot();
+            } else {
+                saveTakenPicture(takeIrPicture(), null, layoutRotateOnOrientation.getCurrentOrientation());
+            }
 
         });
 
@@ -229,12 +244,108 @@ public class MainActivity extends AppCompatActivity {
             startActivity(galleryIntent);
         });
 
+        generateTempImage();
+
     }
 
+    private void generateTempImage() {
+        //khanhlh
+        @SuppressLint("WrongViewCast") Queue<double[][]> tempData = new LinkedList<>();
+        tvTemp = findViewById(R.id.tvTemp);
+        btnGetData = findViewById(R.id.btnGetData);
+        btnGetData.setOnClickListener(v -> {
+            stopOtcInsertAnimation();
+            irView.setVisibility(View.VISIBLE);
+            Handler handler = new Handler();
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    double d = 0;
+                    Log.e("Start loop", getFormatTime());
+                    for (int i = 0; i < OTC.IR_HEIGHT; i++) {
+                        for (int j = 0; j < OTC.IR_WIDTH; j++) {
+                            if (i > OTC.IR_HEIGHT / 4 && i < OTC.IR_HEIGHT / 2) {
+                                if (j > OTC.IR_WIDTH / 4 && j < OTC.IR_WIDTH / 2) {
+                                    d = getRandomNumberInRange(24, 30);
+                                } else if (j > OTC.IR_WIDTH / 2 && j < 3 * OTC.IR_WIDTH / 4) {
+                                    d = getRandomNumberInRange(28, 32);
+                                } else {
+                                    d = getRandomNumberInRange(22,40);
+                                }
+                            } else if (i > OTC.IR_WIDTH / 2 && i < 3 * OTC.IR_WIDTH / 4){
+                                d = getRandomNumberInRange(28, 36);
+                            }else{
+                                d = getRandomNumberInRange(30, 40);
+                            }
+                            OTC.tempData2D[i][j] = d;
+                        }
+                    }
+                    tempData.add(OTC.tempData2D);
+                    double[][] head = tempData.peek();
+                    Log.e("End loop", getFormatTime());
 
-    void setCameraViewEnabled(boolean enabled){
+                    Log.e("Start update image", String.valueOf(getFormatTime()));
+                    irPicture.updateTemperatureData(otc.getIrTemp());
+                    irView.update();
 
-        if(enabled){
+                    //new min max avg temps available, update
+                    DecimalFormat df = new DecimalFormat("#.0");
+                    textMinIrTemp.setText(df.format(otc.getMinIrTemp()));
+                    textMaxIrTemp.setText(df.format(otc.getMaxIrTemp()));
+                    textAvgIrTemp.setText(df.format((otc.getMaxIrTemp() + otc.getMinIrTemp()) / 2.0));
+
+                    //Display temp spectrum according to template
+                    imgTempSpectrum.setImageBitmap(irView.getIRPicture().getSpectrumBitmap());
+                    imgTempSpectrum.invalidate();
+                    Log.e("End update image", String.valueOf(getFormatTime()));
+                    handler.postDelayed(this, 100/3);
+                }
+            }, 100/3);
+        });
+    }
+
+    private void initFirebaseData() {
+        //khanhlh
+        FirebaseDatabase firebaseDatabase = FirebaseDatabase.getInstance(FIREBASE_DB);
+
+        DatabaseReference mDatabase = firebaseDatabase.getReference();
+        mDatabase.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                Temp temp = dataSnapshot.getValue(Temp.class);
+                if (temp != null) {
+                    Log.d(TAG, "Value is: " + temp.getUsername() + temp.getEmail());
+                    hha000001 = temp.getHHA000001();
+                    Log.d(TAG, "Value is: " + hha000001.toString());
+                    arrayTempData = hha000001.getND().split("&");
+                }
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                Log.w(TAG, "Failed to read value.", databaseError.toException());
+            }
+        });
+    }
+
+    private static int getRandomNumberInRange(int min, int max) {
+
+        if (min >= max) {
+            throw new IllegalArgumentException("max must be greater than min");
+        }
+
+        Random r = new Random();
+        return r.nextInt((max - min) + 1) + min;
+    }
+
+    private String getFormatTime() {
+        @SuppressLint("SimpleDateFormat") SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS");
+        return sdf.format(new Date(System.currentTimeMillis()));
+    }
+
+    void setCameraViewEnabled(boolean enabled) {
+
+        if (enabled) {
             camera.setLifecycleOwner(this);
             camera.setVisibility(View.VISIBLE);
         } else {
@@ -243,11 +354,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    IRPicture takeIrPicture(){
+    IRPicture takeIrPicture() {
         return new IRPicture(irView.getIRPicture());
     }
 
-    void saveTakenPicture(IRPicture irPicture, PictureResult rgbPictureResult, int orientation){
+    void saveTakenPicture(IRPicture irPicture, PictureResult rgbPictureResult, int orientation) {
 
         try {
 
@@ -286,22 +397,22 @@ public class MainActivity extends AppCompatActivity {
                 //rgbTransformationMatrix.postTranslate(-w/2.0f, -h/2.0f);
                 //if width > height -> landscape
                 // else portrait
-                if(w > h){
+                if (w > h) {
                     //scale
-                    rgbTransformationMatrix.preScale(sy, sx,0,0);
-                    rgbTransformationMatrix.postRotate(360 - orientation, w/2.0f,h/2.0f);
+                    rgbTransformationMatrix.preScale(sy, sx, 0, 0);
+                    rgbTransformationMatrix.postRotate(360 - orientation, w / 2.0f, h / 2.0f);
                 } else {
                     //scale
-                    rgbTransformationMatrix.preScale(sx, sy,0,0);
-                    rgbTransformationMatrix.postRotate(orientation, w/2.0f,h/2.0f);
+                    rgbTransformationMatrix.preScale(sx, sy, 0, 0);
+                    rgbTransformationMatrix.postRotate(orientation, w / 2.0f, h / 2.0f);
                 }
-                rgbTransformationMatrix.postTranslate((fusedImage.getWidth() - w) / 2.0f , (fusedImage.getHeight() - h)/2.0f);
+                rgbTransformationMatrix.postTranslate((fusedImage.getWidth() - w) / 2.0f, (fusedImage.getHeight() - h) / 2.0f);
 
 
                 //paint
                 temporaryCanvas.drawBitmap(rgbBitmap, rgbTransformationMatrix, rgbPaint);
 
-                Log.d(TAG, "Orientation = " + orientation + " rgbPictureResult.size() = " + rgbPictureResult.getSize() +" rgbPictureResult.getRotation() = " + rgbPictureResult.getRotation() + ", rgbBitmap w,h = " + rgbBitmap.getWidth() + "," + rgbBitmap.getHeight());
+                Log.d(TAG, "Orientation = " + orientation + " rgbPictureResult.size() = " + rgbPictureResult.getSize() + " rgbPictureResult.getRotation() = " + rgbPictureResult.getRotation() + ", rgbBitmap w,h = " + rgbBitmap.getWidth() + "," + rgbBitmap.getHeight());
 
                 ByteArrayOutputStream rgbJpegCompressed = new ByteArrayOutputStream();
                 fusedImage.compress(Bitmap.CompressFormat.JPEG, 90, rgbJpegCompressed);
@@ -337,7 +448,7 @@ public class MainActivity extends AppCompatActivity {
                 ir.put("format", "png:base64");
                 ir.put("data", Base64.encodeToString(pngCompressed.toByteArray(), Base64.NO_WRAP));
 
-                if(irView.filterBitmap){
+                if (irView.filterBitmap) {
                     temporaryCanvas.setDrawFilter(irView.filterPaint);
                 } else {
                     temporaryCanvas.setDrawFilter(irView.noFilterPaint);
@@ -350,7 +461,7 @@ public class MainActivity extends AppCompatActivity {
 
             //rotate final image according to orientation parameter (portrait / landscape)
             Bitmap targetBitmap;
-            if(orientation == 90 || orientation == 270){
+            if (orientation == 90 || orientation == 270) {
                 targetBitmap = Bitmap.createBitmap(irView.getHeight(), irView.getWidth(), Bitmap.Config.ARGB_8888);
             } else {
                 targetBitmap = Bitmap.createBitmap(irView.getWidth(), irView.getHeight(), Bitmap.Config.ARGB_8888);
@@ -359,8 +470,8 @@ public class MainActivity extends AppCompatActivity {
 
             Matrix finalTransformation = new Matrix();
             //then rotate in middle
-            finalTransformation.postRotate(orientation, fusedImage.getWidth()/2.0f,fusedImage.getHeight()/2.0f);
-            finalTransformation.postTranslate((targetBitmap.getWidth() - fusedImage.getWidth())/2.0f, (targetBitmap.getHeight() - fusedImage.getHeight())/2.0f);
+            finalTransformation.postRotate(orientation, fusedImage.getWidth() / 2.0f, fusedImage.getHeight() / 2.0f);
+            finalTransformation.postTranslate((targetBitmap.getWidth() - fusedImage.getWidth()) / 2.0f, (targetBitmap.getHeight() - fusedImage.getHeight()) / 2.0f);
 
             targetCanvas.drawBitmap(fusedImage, finalTransformation, new Paint());
 
@@ -377,7 +488,7 @@ public class MainActivity extends AppCompatActivity {
             folderToSave.mkdirs();
 
 
-            try{
+            try {
 
                 File targetBitmapFile = new File(folderToSave, "IMG_" + tsFormat.format(timestamp) + ".jpg");
                 targetBitmapFile.setWritable(true);
@@ -390,11 +501,11 @@ public class MainActivity extends AppCompatActivity {
 
                 Log.d(TAG, "Saved targetBitmap as: " + targetBitmapFile.getAbsolutePath());
 
-            } catch (IOException ioException){
+            } catch (IOException ioException) {
                 Log.d(TAG, "IOException while trying to write target bitmap: " + ioException.getLocalizedMessage());
             }
 
-            try{
+            try {
                 File otcFile = new File(folderToSave, "IMG_" + tsFormat.format(timestamp) + ".otc");
                 otcFile.setWritable(true);
                 FileOutputStream fos = new FileOutputStream(otcFile);
@@ -406,7 +517,7 @@ public class MainActivity extends AppCompatActivity {
 
                 Log.d(TAG, "Saved otc file as: " + otcFile.getAbsolutePath());
 
-            } catch (IOException ioException){
+            } catch (IOException ioException) {
                 Log.d(TAG, "IOException while trying to write otc file: " + ioException.getLocalizedMessage());
             }
 
@@ -414,7 +525,7 @@ public class MainActivity extends AppCompatActivity {
             //media scanner connection
             MediaScannerConnection.scanFile(MainActivity.this, new String[]{folderToSave.getAbsolutePath()}, null, null);
 
-        } catch (JSONException jsonException){
+        } catch (JSONException jsonException) {
             Log.d(TAG, "JSONException: " + jsonException.getMessage());
         }
     }
@@ -425,13 +536,13 @@ public class MainActivity extends AppCompatActivity {
         public void onStateChanged(OTC.OTCState otcState, OTC.UsbState usbState) {
             Log.d("MainActivity", "State changed: otc = " + otcState.name() + ", usb = " + usbState.name());
             //start animation if OTC is unplugged
-            if(usbState == OTC.UsbState.CONNECTED){
+            if (usbState == OTC.UsbState.CONNECTED) {
                 stopOtcInsertAnimation();
             } else {
                 startOtcInsertAnimation();
             }
 
-            if(otcState == OTC.OTCState.READY){
+            if (otcState == OTC.OTCState.READY) {
                 // OTC is ready
                 stopOtcInsertAnimation();
                 onResume();
@@ -459,7 +570,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnTakePicture).setEnabled(false);
     }
 
-    void stopOtcInsertAnimation(){
+    void stopOtcInsertAnimation() {
 
         insertOtcAni.setVisible(false, true);
         imgInsertOtc.setVisibility(View.INVISIBLE);
@@ -491,7 +602,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-
     @Override
     protected void onResume() {
         super.onResume();
@@ -512,10 +622,11 @@ public class MainActivity extends AppCompatActivity {
         int emissivityPercent = 90;
         try {
             emissivityPercent = sharedPreferences.getInt("emissivity", 90);
-        } catch(Exception ex){
+        } catch (Exception ex) {
             try {
                 emissivityPercent = Integer.parseInt(sharedPreferences.getString("emissivity", "90"));
-            }catch (Exception ex1){}
+            } catch (Exception ex1) {
+            }
         }
         double emissivity = emissivityPercent / 100.0; //percent to absolute
         //set emissivity
@@ -557,7 +668,7 @@ public class MainActivity extends AppCompatActivity {
         setCameraViewEnabled(overlay_enabled);
         //if overlay not enabled, hide camera layout
         Log.d(TAG, "overlay_enabled: " + overlay_enabled);
-        if(!overlay_enabled){
+        if (!overlay_enabled) {
             camera.setVisibility(View.GONE);
             irView.setVisibility(View.VISIBLE);
             irView.setImageAlpha(255);
@@ -575,10 +686,10 @@ public class MainActivity extends AppCompatActivity {
         // check USB state and if USB not connected, display "insert OTC" animation
         //debug
         Log.d(TAG, "USB state: " + otc.getUsbState() + ", OTC state: " + otc.getOTCState());
-        if(otc.getUsbState() == OTC.UsbState.DISCONNECTED && otc.getOTCState() == OTC.OTCState.NOT_READY){
+        if (otc.getUsbState() == OTC.UsbState.DISCONNECTED && otc.getOTCState() == OTC.OTCState.NOT_READY) {
             startOtcInsertAnimation();
         }
-        if(otc.getUsbState() == OTC.UsbState.CONNECTED && otc.getOTCState() == OTC.OTCState.READY) {
+        if (otc.getUsbState() == OTC.UsbState.CONNECTED && otc.getOTCState() == OTC.OTCState.READY) {
             stopOtcInsertAnimation();
         }
 
@@ -596,10 +707,10 @@ public class MainActivity extends AppCompatActivity {
 
     /* Orientation change, rotate all icons, texts and buttons */
 
-    private int getRotationInDegrees(int rotationConstant){
+    private int getRotationInDegrees(int rotationConstant) {
         int currentRotationInDegrees = 0;
-        switch(rotationConstant){
-            case Surface.ROTATION_0 :
+        switch (rotationConstant) {
+            case Surface.ROTATION_0:
                 currentRotationInDegrees = 0;
                 break;
 
@@ -628,7 +739,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 if (child != null) {
                     // DO SOMETHING WITH VIEW
-                    if(child instanceof ImageButton || child instanceof TextView){
+                    if (child instanceof ImageButton || child instanceof TextView) {
                         toAdd.add(child);
                     }
                 }
@@ -640,7 +751,7 @@ public class MainActivity extends AppCompatActivity {
     private class LayoutRotateOnOrientation extends OrientationEventListener {
 
 
-        public int getCurrentOrientation(){
+        public int getCurrentOrientation() {
             return current_orientation;
         }
 
@@ -649,13 +760,14 @@ public class MainActivity extends AppCompatActivity {
         private int diff = 0;
 
         Display display = null;
-        LayoutRotateOnOrientation(){
+
+        LayoutRotateOnOrientation() {
             super(MainActivity.this, SensorManager.SENSOR_DELAY_UI);
             display = ((WindowManager) getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
 
         }
 
-        public void uiRotate(int angle){
+        public void uiRotate(int angle) {
 
             for (View v : viewsToRotate) {
 
@@ -676,24 +788,23 @@ public class MainActivity extends AppCompatActivity {
         }
 
 
-
         @Override
         public void onOrientationChanged(int orientation) {
 
             //Algorithm adopted from Open Camera project by Mark Harman
 
-            if( orientation != OrientationEventListener.ORIENTATION_UNKNOWN ) {
+            if (orientation != OrientationEventListener.ORIENTATION_UNKNOWN) {
 
                 diff = Math.abs(orientation - current_orientation);
-                if( diff > 180 ) {
+                if (diff > 180) {
                     diff = 360 - diff;
                 }
 
                 // threshold
-                if( diff > 60 ) {
+                if (diff > 60) {
                     orientation = ((orientation + 45) / 90 * 90) % 360;
 
-                    if( orientation != current_orientation ) {
+                    if (orientation != current_orientation) {
                         current_orientation = orientation;
 
                         Log.d(TAG, "current_orientation is now: " + current_orientation);
@@ -701,10 +812,18 @@ public class MainActivity extends AppCompatActivity {
                         int rotation = MainActivity.this.getWindowManager().getDefaultDisplay().getRotation();
                         int degrees = 0;
                         switch (rotation) {
-                            case Surface.ROTATION_0: degrees = 0; break;
-                            case Surface.ROTATION_90: degrees = 90; break;
-                            case Surface.ROTATION_180: degrees = 180; break;
-                            case Surface.ROTATION_270: degrees = 270; break;
+                            case Surface.ROTATION_0:
+                                degrees = 0;
+                                break;
+                            case Surface.ROTATION_90:
+                                degrees = 90;
+                                break;
+                            case Surface.ROTATION_180:
+                                degrees = 180;
+                                break;
+                            case Surface.ROTATION_270:
+                                degrees = 270;
+                                break;
                             default:
                                 break;
                         }
@@ -725,7 +844,6 @@ public class MainActivity extends AppCompatActivity {
 
         }
     }
-
 
 
 }
